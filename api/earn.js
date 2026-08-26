@@ -31,7 +31,7 @@ const signTaskStart = (userId, taskId, startTime) =>
 const signAdStart = (userId, network, startTime) =>
     crypto.createHmac('sha256', SECRET).update(`ad:${userId}:${network}:${startTime}`).digest('hex');
 
-// A multi-account-flagged user earns no NEW WTC until they verify channel +
+// A multi-account-flagged user earns no NEW DC until they verify channel +
 // community membership. Progress/counters still advance normally.
 const REWARD_ELIGIBLE_FILTER = { $or: [{ multiAccountFlag: { $ne: true } }, { channelVerified: true }] };
 
@@ -109,7 +109,7 @@ async function handleClaimAdReward(req, res, db, userId) {
             ...REWARD_ELIGIBLE_FILTER,
         },
         {
-            $inc: { wtcBalance: config.reward, lifetimeWtcEarned: config.reward, lifetimeAdsWatched: 1, adsWatchedToday: 1, [counterField]: 1 },
+            $inc: { dcBalance: config.reward, lifetimeDcEarned: config.reward, lifetimeAdsWatched: 1, adsWatchedToday: 1, [counterField]: 1 },
             $addToSet: { usedAdStarts: adStartKey },
             $set: { lastAdClaimAt: new Date() },
         },
@@ -127,7 +127,7 @@ async function handleClaimAdReward(req, res, db, userId) {
         return res.status(400).json({ ok: false, error: 'claim_failed' });
     }
 
-    return res.status(200).json({ ok: true, rewardWtc: config.reward, network });
+    return res.status(200).json({ ok: true, rewardDc: config.reward, network });
 }
 
 // ── taskStart ── issued the instant the user taps "Start" on a task, before
@@ -209,7 +209,7 @@ async function handleTaskComplete(req, res, db, userId) {
     );
     if (!taskGate) return res.status(400).json({ ok: false, error: 'task_full' });
 
-    const rewardWtc = task.rewardWtc || task.rewardGold || task.rewardPoints || 10; // fallback if admin left it blank
+    const rewardDc = task.rewardDc || task.rewardGold || task.rewardPoints || 10; // fallback if admin left it blank
 
     // STEP 2 — atomically credit the user (a double-claim by the same user is
     // caught right here). The taskStart token, if any, is marked spent in the
@@ -222,7 +222,7 @@ async function handleTaskComplete(req, res, db, userId) {
             ...REWARD_ELIGIBLE_FILTER,
         },
         {
-            $inc: { wtcBalance: rewardWtc, lifetimeWtcEarned: rewardWtc, tasksCompletedToday: 1 },
+            $inc: { dcBalance: rewardDc, lifetimeDcEarned: rewardDc, tasksCompletedToday: 1 },
             $addToSet: taskStartKey ? { completedTasks: taskId, usedTaskStarts: taskStartKey } : { completedTasks: taskId },
         },
         { returnDocument: 'after' }
@@ -242,7 +242,7 @@ async function handleTaskComplete(req, res, db, userId) {
     }
 
     await maybeAwardReferralMilestones(db, userId, { completedTasksCount: gate.completedTasks.length });
-    return res.status(200).json({ ok: true, rewardWtc });
+    return res.status(200).json({ ok: true, rewardDc });
 }
 
 // ── claimPromo ──
@@ -281,7 +281,7 @@ async function handleClaimPromo(req, res, db, userId) {
     const reward = promo.reward || 0;
     const creditResult = await users.updateOne(
         { _id: userId, ...REWARD_ELIGIBLE_FILTER },
-        { $inc: { wtcBalance: reward, lifetimeWtcEarned: reward } }
+        { $inc: { dcBalance: reward, lifetimeDcEarned: reward } }
     );
     if (creditResult.matchedCount === 0) {
         return res.status(403).json({ ok: false, error: 'account_under_review' });
@@ -308,4 +308,4 @@ export default async function handler(req, res) {
         case 'claimAdReward':  return handleClaimAdReward(req, res, db, userId);
         default: return res.status(400).json({ ok: false, error: 'unknown_action' });
     }
-                                     }
+                                                                }
