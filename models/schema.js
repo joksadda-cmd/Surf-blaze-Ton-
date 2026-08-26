@@ -40,10 +40,8 @@
 //   uslCountToday: 0,                   // ⚠️ NEW — USL Ads (TowerAds), live
 //   lastAdClaimAt: Date,                 // ⚠️ NEW — enforces AD_COOLDOWN_SECONDS between ad claims (see api/earn.js)
 //   usedAdStarts: [],                   // single-use ad-claim tokens, reset daily (⚠️ FIX — was never reset before, grew forever)
-//   usedLootboxStarts: [],               // single-use lootbox-claim tokens, reset daily (⚠️ FIX — was never reset before, grew forever)
-//   usedTaskStarts: [],                  // ⚠️ NEW — single-use task-claim tokens (non-'channel' categories), reset daily
+//   usedTaskStarts: [],                  // single-use task-claim tokens (non-'channel' categories), reset daily
 //
-//   dailyVideoWtcMined: 0,
 //   tasksCompletedToday: 0,
 //   lastResetDate: "06/27/2026",
 //   welcomeBonusClaimed: false,
