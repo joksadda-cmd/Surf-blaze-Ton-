@@ -20,7 +20,7 @@ import { verifyTelegramInitData } from '../lib/telegramAuth.js';
 import { TASK_MIN_WAIT_SECONDS, AD_NETWORK_REWARDS, AD_MIN_WATCH_SECONDS, AD_COOLDOWN_SECONDS } from '../lib/constants.js';
 import crypto from 'crypto';
 
-const SECRET = process.env.VIDEO_SIGNING_SECRET; // kept name for continuity — used to sign ANY short-lived action token, not just video
+const SECRET = process.env.ACTION_SIGNING_SECRET; // ⚠️ RENAMED (was VIDEO_SIGNING_SECRET — no video feature exists anymore, name was pure leftover) — signs short-lived task/ad action tokens. You must set this env var on Vercel (any long random string) or every task/ad claim will fail with "server_misconfigured".
 
 // Task-claim tokens are namespaced with 'task:' + the taskId, so a token
 // issued for one task can never be replayed to claim a different one.
@@ -308,4 +308,4 @@ export default async function handler(req, res) {
         case 'claimAdReward':  return handleClaimAdReward(req, res, db, userId);
         default: return res.status(400).json({ ok: false, error: 'unknown_action' });
     }
-                                                                }
+}
