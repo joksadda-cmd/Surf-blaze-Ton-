@@ -75,10 +75,9 @@ async function handleInit(req, res, db) {
         _id: userId,
         firstName: firstName || 'User',
         telegramUsername: username || 'N/A',
-        wtcBalance: 0,
+        dcBalance: 0,
         usdtBalance: 0,
-        lifetimeWtcEarned: 0,
-        pendingVideoWTC: 0,
+        lifetimeDcEarned: 0,
         referralCount: 0,
         weeklyReferralCount: 0,
         totalInvites: 0,
@@ -98,9 +97,7 @@ async function handleInit(req, res, db) {
         gigaCountToday: 0,
         uslCountToday: 0,
         usedAdStarts: [],
-        usedLootboxStarts: [],
         usedTaskStarts: [],
-        dailyVideoWtcMined: 0,
         tasksCompletedToday: 0,
         lastResetDate: todayBD(),
         welcomeBonusClaimed: false,
@@ -227,4 +224,4 @@ export default async function handler(req, res) {
     }
 
     return res.status(405).json({ ok: false, error: 'method_not_allowed' });
-    }
+            }
