@@ -8,11 +8,13 @@
 // No percentage fees are taken — the CPM rate the admin sets already IS the
 // final per-impression payout (see lib/constants.js for why).
 //
-// ⚠️ Weekly-Friday-only submission window — NOT implemented yet. Admin has
-// asked for this to be added later, once they're done testing withdraw
-// end-to-end (a real once-a-week lock would block that testing right now).
-// WITHDRAWALS_OPEN below is still just the existing manual admin on/off
-// switch — nothing day-of-week-specific yet.
+// ⚠️ Weekly-Friday-only submission window — ENABLED (admin confirmed
+// testing is done). Withdraw requests (POST) are only accepted when
+// isFridayBD() is true — "airdrop-style," once a week, Bangladesh time.
+// Approving/rejecting an already-submitted request from the bot is NOT
+// restricted to Fridays — only the user-facing submission is.
+// WITHDRAWALS_OPEN is still the separate, existing manual admin on/off
+// switch — both gates apply independently.
 //
 // Referral gate: the user's FIRST withdrawal ever is free. Every withdrawal
 // after that consumes exactly one "valid referral" — see lib/referral.js,
@@ -23,7 +25,7 @@
 // No address lock — user can withdraw to a different address/method every
 // time if they want.
 //
-//   GET  /api/withdraw?action=status&initData=...   → balance + full eligibility snapshot (includes live CPM rate)
+//   GET  /api/withdraw?action=status&initData=...   → balance + full eligibility snapshot (includes live CPM rate, isFridayToday)
 //   GET  /api/withdraw?action=history&initData=...
 //   POST /api/withdraw   body: { initData, method, details, dcAmount }
 
@@ -35,8 +37,8 @@ import { getCpmRate } from '../lib/settings.js';
 import {
     WITHDRAW_METHODS, DC_PER_IMPRESSION, MIN_WITHDRAW_DC, MIN_WITHDRAW_IMPRESSIONS,
     WITHDRAW_TASKS_REQUIRED, WITHDRAW_ADS_REQUIRED, WITHDRAW_VALID_REFERRALS_PER_WITHDRAW,
-    WITHDRAW_REFERRAL_COMMISSION_PERCENT,
-    todayBD, WITHDRAWALS_OPEN,
+    WITHDRAW_REFERRAL_COMMISSION_PERCENT, WITHDRAW_DAY_ONLY_FRIDAY,
+    todayBD, isFridayBD, WITHDRAWALS_OPEN,
 } from '../lib/constants.js';
 
 const ADMIN_ID = process.env.ADMIN_ID;
@@ -78,6 +80,8 @@ async function handleStatus(req, res, db) {
         minWithdrawDc: MIN_WITHDRAW_DC,
         minWithdrawImpressions: MIN_WITHDRAW_IMPRESSIONS,
         withdrawalsOpen: WITHDRAWALS_OPEN,
+        fridayOnly: WITHDRAW_DAY_ONLY_FRIDAY,
+        isFridayToday: isFridayBD(),
         withdrawRequirements: {
             adsRequired: WITHDRAW_ADS_REQUIRED, adsWatchedToday: adsToday, adsMet: adsToday >= WITHDRAW_ADS_REQUIRED,
             tasksRequired: WITHDRAW_TASKS_REQUIRED, tasksHave: tasksLifetime, tasksMet: tasksLifetime >= WITHDRAW_TASKS_REQUIRED,
@@ -114,6 +118,9 @@ async function handleHistory(req, res, db) {
 async function handleCreate(req, res, db) {
     if (!WITHDRAWALS_OPEN) {
         return res.status(403).json({ ok: false, error: 'withdrawals_closed', message: 'Withdrawals are currently closed. Any previously submitted request will still be processed.' });
+    }
+    if (WITHDRAW_DAY_ONLY_FRIDAY && !isFridayBD()) {
+        return res.status(403).json({ ok: false, error: 'not_friday', message: 'Withdrawals only open on Fridays. Come back this Friday to submit your request.' });
     }
 
     const verified = verifyTelegramInitData(req.body?.initData);
@@ -339,4 +346,4 @@ export default async function handler(req, res) {
     }
 
     return res.status(405).json({ ok: false, error: 'method_not_allowed' });
-}
+                                     }
