@@ -17,7 +17,7 @@ import { isMember } from '../lib/telegram.js';
 import { ensureDailyReset } from '../lib/dailyReset.js';
 import { maybeAwardReferralMilestones } from '../lib/referral.js';
 import { verifyTelegramInitData } from '../lib/telegramAuth.js';
-import { TASK_MIN_WAIT_SECONDS, AD_NETWORK_REWARDS, AD_MIN_WATCH_SECONDS, AD_COOLDOWN_SECONDS } from '../lib/constants.js';
+import { TASK_MIN_WAIT_SECONDS, AD_NETWORK_REWARDS, AD_MIN_WATCH_SECONDS, AD_COOLDOWN_SECONDS, MINING_DURATION_MS, MINING_REWARD_DC } from '../lib/constants.js';
 import crypto from 'crypto';
 
 const SECRET = process.env.ACTION_SIGNING_SECRET; // ⚠️ RENAMED (was VIDEO_SIGNING_SECRET — no video feature exists anymore, name was pure leftover) — signs short-lived task/ad action tokens. You must set this env var on Vercel (any long random string) or every task/ad claim will fail with "server_misconfigured".
@@ -290,6 +290,59 @@ async function handleClaimPromo(req, res, db, userId) {
     return res.status(200).json({ ok: true, reward });
 }
 
+// ── Mining (Home tab) ──
+// Start a 2-hour session; once it's elapsed, claim MINING_REWARD_DC and the
+// session clears — the user can immediately start the next one. Only one
+// session can run at a time (miningStartedAt is null when idle).
+async function handleMiningStart(req, res, db, userId) {
+    const users = db.collection('users');
+    const user = await users.findOne({ _id: userId });
+    if (!user) return res.status(404).json({ ok: false, error: 'user_not_found' });
+    if (user.isBanned) return res.status(403).json({ ok: false, error: 'banned' });
+    if (user.miningStartedAt) {
+        return res.status(400).json({ ok: false, error: 'already_mining', miningStartedAt: user.miningStartedAt });
+    }
+
+    const startedAt = new Date();
+    const gate = await users.findOneAndUpdate(
+        { _id: userId, miningStartedAt: null },
+        { $set: { miningStartedAt: startedAt } },
+        { returnDocument: 'after' }
+    );
+    if (!gate) return res.status(400).json({ ok: false, error: 'already_mining' });
+
+    return res.status(200).json({ ok: true, miningStartedAt: startedAt, durationMs: MINING_DURATION_MS });
+}
+
+async function handleMiningClaim(req, res, db, userId) {
+    const users = db.collection('users');
+    const user = await users.findOne({ _id: userId });
+    if (!user) return res.status(404).json({ ok: false, error: 'user_not_found' });
+    if (user.isBanned) return res.status(403).json({ ok: false, error: 'banned' });
+    if (!user.miningStartedAt) return res.status(400).json({ ok: false, error: 'not_mining' });
+
+    const elapsedMs = Date.now() - new Date(user.miningStartedAt).getTime();
+    if (elapsedMs < MINING_DURATION_MS) {
+        return res.status(400).json({ ok: false, error: 'not_ready', remainingMs: MINING_DURATION_MS - elapsedMs });
+    }
+
+    const gate = await users.findOneAndUpdate(
+        { _id: userId, miningStartedAt: user.miningStartedAt, ...REWARD_ELIGIBLE_FILTER },
+        { $inc: { dcBalance: MINING_REWARD_DC, lifetimeDcEarned: MINING_REWARD_DC }, $set: { miningStartedAt: null } },
+        { returnDocument: 'after' }
+    );
+    if (!gate) {
+        // Either already claimed by a concurrent request, or blocked by the
+        // multi-account review gate (session left untouched in that case
+        // so a later verify can still claim it).
+        const fresh = await users.findOne({ _id: userId }, { projection: { miningStartedAt: 1, multiAccountFlag: 1, channelVerified: 1 } });
+        if (!fresh?.miningStartedAt) return res.status(400).json({ ok: false, error: 'already_claimed' });
+        return res.status(403).json({ ok: false, error: 'account_under_review' });
+    }
+
+    return res.status(200).json({ ok: true, reward: MINING_REWARD_DC, newDcBalance: gate.dcBalance });
+}
+
 export default async function handler(req, res) {
     if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'method_not_allowed' });
 
@@ -306,6 +359,8 @@ export default async function handler(req, res) {
         case 'claimPromo':     return handleClaimPromo(req, res, db, userId);
         case 'adStart':        return handleAdStart(req, res, db, userId);
         case 'claimAdReward':  return handleClaimAdReward(req, res, db, userId);
+        case 'miningStart':    return handleMiningStart(req, res, db, userId);
+        case 'miningClaim':    return handleMiningClaim(req, res, db, userId);
         default: return res.status(400).json({ ok: false, error: 'unknown_action' });
     }
-}
+            }
