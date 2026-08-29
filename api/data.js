@@ -2,6 +2,7 @@
 // ticker — public read-only data.
 //   GET /api/data?type=tasks
 //   GET /api/data?type=leaderboard        (referralCount অনুযায়ী টপ ২০)
+//   GET /api/data?type=gameLeaderboard    (Surf Drive gameHighScore অনুযায়ী টপ ৩০ — ⚠️ NEW)
 //   GET /api/data?type=weeklyContest
 //   GET /api/data?type=recentWithdrawals   (Home-এ "social proof" ticker-এর জন্য — সত্যিকারের approved withdraw, username মাস্ক করা)
 
@@ -44,6 +45,25 @@ export default async function handler(req, res) {
             return res.status(200).json({ ok: true, leaderboard: top });
         }
 
+        // ⚠️ NEW — Surf Drive top-scorer list (Home tab's "Top Scores" button).
+        // Ranked by gameHighScore (best single-run distance in "meters"),
+        // the same lifetime-best field claimGameReward raises via $max in
+        // api/earn.js. Users who've never played (or never beaten 0) are
+        // excluded rather than shown at the bottom with a 0. Top 30
+        // (⚠️ CHANGED — was 20). Each user has exactly one `users` document,
+        // so this query can never return the same person twice on its own —
+        // see the frontend note in index.html's openGameLeaderboardModal for
+        // the one place a duplicate could otherwise appear to the viewer.
+        if (type === 'gameLeaderboard') {
+            const top = await db.collection('users')
+                .find({ isBanned: { $ne: true }, gameHighScore: { $gt: 0 } })
+                .project({ telegramUsername: 1, firstName: 1, gameHighScore: 1 })
+                .sort({ gameHighScore: -1 })
+                .limit(30)
+                .toArray();
+            return res.status(200).json({ ok: true, leaderboard: top });
+        }
+
         if (type === 'recentWithdrawals') {
             const recent = await db.collection('withdrawals')
                 .find({ status: 'approved' })
@@ -79,4 +99,4 @@ export default async function handler(req, res) {
         console.error('data error:', err);
         return res.status(500).json({ ok: false, error: 'server_error' });
     }
-        }
+}
