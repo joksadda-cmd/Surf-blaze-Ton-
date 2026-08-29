@@ -98,6 +98,8 @@ async function handleInit(req, res, db) {
         uslCountToday: 0,
         usedAdStarts: [],
         usedTaskStarts: [],
+        usedGameStarts: [],
+        gameHighScore: 0, // best Surf Drive run distance ("meters") — powers the Home top-scorers leaderboard
         tasksCompletedToday: 0,
         lastResetDate: todayBD(),
         welcomeBonusClaimed: false,
@@ -224,4 +226,4 @@ export default async function handler(req, res) {
     }
 
     return res.status(405).json({ ok: false, error: 'method_not_allowed' });
-            }
+                                            }
