@@ -55,6 +55,10 @@
 //   validReferralCount: 0,              // lifetime, +1 when a referral completes all 3 steps (lib/referral.js)
 //   usedValidReferrals: 0,              // +1 each withdraw after the user's first (free) one — see api/withdraw.js
 //   lastActiveAt: Date,                  // ⚠️ NEW — refreshed on every app open, powers the 90-day dead-account TTL below
+//
+//   // ── Surf Drive game (⚠️ NEW) ──
+//   usedGameStarts: [],                 // single-use game-run claim tokens, reset daily (see api/earn.js)
+//   gameHighScore: 0,                   // best single-run distance ("meters") ever reached — raised via $max on every claim, powers the Home "Top Scores" leaderboard
 // }
 //
 // ⚠️ NEW — a partial TTL index on `bannedAt` (see setupIndexes below) makes
@@ -193,6 +197,8 @@ async function setupIndexes() {
     await db.collection('users').createIndex({ isBanned: 1 });
     // ⚠️ NEW — speeds up the weekly cron's top-N sort (api/cron/weeklyReferral.js)
     await db.collection('users').createIndex({ weeklyReferralCount: -1 });
+    // ⚠️ NEW — speeds up the Home "Top Scores" leaderboard's sort (api/data.js type=gameLeaderboard)
+    await db.collection('users').createIndex({ gameHighScore: -1 });
     // ⚠️ NEW — partial TTL index: ONLY documents with isBanned:true expire
     // (60 days after bannedAt). A merely multiAccountFlag'd user (not yet
     // banned) is NEVER touched — this only deletes confirmed, admin-banned
