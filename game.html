@@ -1610,7 +1610,7 @@
         // this run, so it can turn them into real DC balance. Standalone
         // (opened outside the app) this is a no-op since there's no parent.
         if (window.parent && window.parent !== window) {
-            window.parent.postMessage({ type: 'surfdrive:gameover', coins: coins }, '*');
+            window.parent.postMessage({ type: 'surfdrive:gameover', coins: coins, distance: Math.floor(distance) }, '*');
         }
     }
 
