@@ -78,6 +78,8 @@ async function handleInit(req, res, db) {
         dcBalance: 0,
         usdtBalance: 0,
         lifetimeDcEarned: 0,
+        impressionBalance: 0,       // ⚠️ NEW — withdraw-only currency, gained exclusively via Convert (api/convert.js)
+        lastConvertDate: null,      // ⚠️ NEW — Bangladesh calendar date of the last successful Convert, enforces the once-a-day limit
         referralCount: 0,
         weeklyReferralCount: 0,
         totalInvites: 0,
@@ -226,4 +228,4 @@ export default async function handler(req, res) {
     }
 
     return res.status(405).json({ ok: false, error: 'method_not_allowed' });
-                                            }
+}
