@@ -59,6 +59,10 @@
 //   // ── Surf Drive game (⚠️ NEW) ──
 //   usedGameStarts: [],                 // single-use game-run claim tokens, reset daily (see api/earn.js)
 //   gameHighScore: 0,                   // best single-run distance ("meters") ever reached — raised via $max on every claim, powers the Home "Top Scores" leaderboard
+//
+//   // ── Convert: DC → impression (⚠️ NEW) ──
+//   impressionBalance: 0,               // withdraw-only currency — gained EXCLUSIVELY via Convert (api/convert.js), spent via withdraw (api/withdraw.js)
+//   lastConvertDate: null,              // Bangladesh calendar date ("YYYY-MM-DD" via todayBD()) of the last successful Convert — enforces CONVERT_DAILY_LIMIT (currently 1/day)
 // }
 //
 // ⚠️ NEW — a partial TTL index on `bannedAt` (see setupIndexes below) makes
@@ -127,17 +131,20 @@
 // {
 //   _id: ObjectId, userId: "123456789", method: "binance" | "tonkeeper",
 //   details: "address/uid",
-//   dcAmount: 2000, impressions: 40, cpmRateAtRequest: 0.2, cashAmount: 0.008, currency: "USDT",
+//   ⚠️ CHANGED — withdrawals are now impression-only (see api/withdraw.js).
+//   impressions: 40,                     // debited from impressionBalance — this is the real, refundable amount
+//   dcEquivalent: 2000,                  // impressions × DC_PER_IMPRESSION — display/audit/commission-calc ONLY, never itself a balance
+//   cpmRateAtRequest: 0.2, cashAmount: 0.008, currency: "USDT",
 //   referralConsumed: false,            // true if this withdraw spent one of the user's valid referrals (all but their 1st)
 //   referrerId: "123456789" | null,     // ⚠️ NEW — snapshot of user.referredBy at withdraw time, for audit
-//   referrerCommissionPaid: 0,          // 10% of dcAmount credited to referrerId (as DC), 0 if no referrer
+//   referrerCommissionPaid: 0,          // 10% of dcEquivalent credited to referrerId (as DC), paid at APPROVAL time (api/bot.js), 0 if no referrer or still pending
 //   status: "pending" | "approved" | "rejected", createdAt: Date, processedAt: Date
 // }
 //
 // ⚠️ NEW — a partial TTL index on `processedAt` (see setupIndexes below)
 // auto-deletes a withdrawal doc 90 days after it's REJECTED — a rejected
-// request already refunds the DC in full at reject time, so it has no
-// further use beyond a brief audit trail. 'pending'/'approved' withdrawals
+// request already refunds the impressions in full at reject time, so it has
+// no further use beyond a brief audit trail. 'pending'/'approved' withdrawals
 // are real financial records and are never touched by this index.
 //
 // ──────────────────────────────────────────────────────────────────
