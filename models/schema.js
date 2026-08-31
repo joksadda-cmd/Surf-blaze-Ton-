@@ -58,6 +58,7 @@
 //
 //   // ── Surf Drive game (⚠️ NEW) ──
 //   usedGameStarts: [],                 // single-use game-run claim tokens, reset daily (see api/earn.js)
+//   currentGameStartTime: null,         // ⚠️ NEW — only THIS startTime can be claimed; a new gameStart call overwrites it, instantly invalidating whatever token came before (closes a "mint many tokens, wait, claim them all" exploit — see api/earn.js)
 //   gameHighScore: 0,                   // best single-run distance ("meters") ever reached — raised via $max on every claim, powers the Home "Top Scores" leaderboard
 //
 //   // ── Convert: DC → impression (⚠️ NEW) ──
