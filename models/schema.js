@@ -40,6 +40,7 @@
 //   uslCountToday: 0,                   // ⚠️ NEW — USL Ads (TowerAds), live
 //   lastAdClaimAt: Date,                 // ⚠️ NEW — enforces AD_COOLDOWN_SECONDS between ad claims (see api/earn.js)
 //   usedAdStarts: [],                   // single-use ad-claim tokens, reset daily (⚠️ FIX — was never reset before, grew forever)
+//   currentAdStartTime: {},             // ⚠️ NEW — single-active-token lock per ad network, e.g. { adsgramDaily: 1234567890 } — same idea as currentGameStartTime below (see api/earn.js adStart/claimAdReward)
 //   usedTaskStarts: [],                  // single-use task-claim tokens (non-'channel' categories), reset daily
 //
 //   tasksCompletedToday: 0,
