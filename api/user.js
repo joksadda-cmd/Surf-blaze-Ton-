@@ -99,8 +99,10 @@ async function handleInit(req, res, db) {
         gigaCountToday: 0,
         uslCountToday: 0,
         usedAdStarts: [],
+        currentAdStartTime: {}, // ⚠️ NEW — single-active-token lock per network, e.g. { adsgramDaily: 1234567890 } (see api/earn.js adStart/claimAdReward)
         usedTaskStarts: [],
         usedGameStarts: [],
+        currentGameStartTime: null, // ⚠️ NEW — single-active-token lock for the game reward flow (see api/earn.js gameStart/claimGameReward) — closes a mint-many-tokens exploit
         gameHighScore: 0, // best Surf Drive run distance ("meters") — powers the Home top-scorers leaderboard
         tasksCompletedToday: 0,
         lastResetDate: todayBD(),
@@ -228,4 +230,4 @@ export default async function handler(req, res) {
     }
 
     return res.status(405).json({ ok: false, error: 'method_not_allowed' });
-}
+        }
