@@ -1,20 +1,18 @@
-// api/withdraw.js — IMPRESSION-ONLY WITHDRAW (⚠️ CHANGED)
+// api/withdraw.js — USDT-DIRECT WITHDRAW (⚠️ CHANGED — withdraw now spends
+// from usdtBalance, which is ONLY ever filled by Convert (api/convert.js —
+// DC → USDT at the fixed DC_PER_USD rate, minus CONVERT_FEE_PERCENT). A
+// user can no longer withdraw DC directly; they must Convert first.
 //
-// Withdrawals no longer touch dcBalance directly — a user must first use
-// Convert (api/convert.js) to turn DC into impressions, then withdraw FROM
-// their impressionBalance. The user picks an impressions amount (minimum
-// MIN_WITHDRAW_IMPRESSIONS), a method (Binance UID / Tonkeeper), and
-// submits. Payout is computed from real ad-revenue economics:
-//   usdAmount = (impressions / 1000) * currentCpmRate    — CPM is admin-set (see lib/settings.js), changes over time
-// No percentage fee here — the 5% Convert fee (see api/convert.js) is the
-// only fee in this whole DC→impression→cash pipeline; withdraw itself is
-// fee-free on top of that.
+// A user types a USD amount straight from their usdtBalance (minimum
+// MIN_WITHDRAW_USDT), picks a method (Binance UID / Tonkeeper), and
+// submits. No further conversion happens here — it's already USDT. No fee
+// is taken on withdraw itself (the only fee in this whole DC→USDT→cash
+// pipeline is the Convert fee, already paid at the Convert step).
 //
-// ⚠️ Weekly-Friday-only submission window — ENABLED (admin confirmed
-// testing is done). Withdraw requests are only accepted when isFridayBD()
-// is true — "airdrop-style," once a week, Bangladesh time.
-// Approving/rejecting an already-submitted request from the bot is NOT
-// restricted to Fridays — only the user-facing submission is.
+// ⚠️ Weekly-Friday-only submission window — withdraw requests are only
+// accepted when isFridayBD() is true — "airdrop-style," once a week,
+// Bangladesh time. Approving/rejecting an already-submitted request from
+// the bot is NOT restricted to Fridays — only the user-facing submission is.
 // WITHDRAWALS_OPEN is still the separate, existing manual admin on/off
 // switch — both gates apply independently.
 //
@@ -27,33 +25,22 @@
 // No address lock — user can withdraw to a different address/method every
 // time if they want.
 //
-//   GET  /api/withdraw?action=status&initData=...   → impression balance + full eligibility snapshot (includes live CPM rate, isFridayToday)
+//   GET  /api/withdraw?action=status&initData=...   → USDT balance + full eligibility snapshot (includes isFridayToday)
 //   GET  /api/withdraw?action=history&initData=...
-//   POST /api/withdraw   body: { initData, method, details, impressions }
+//   POST /api/withdraw   body: { initData, method, details, usdtAmount }
 
 import { connectToDatabase } from '../lib/mongodb.js';
 import { tgSend } from '../lib/telegram.js';
 import { ensureDailyReset } from '../lib/dailyReset.js';
 import { verifyTelegramInitData } from '../lib/telegramAuth.js';
-import { getCpmRate } from '../lib/settings.js';
 import {
-    WITHDRAW_METHODS, DC_PER_IMPRESSION, MIN_WITHDRAW_IMPRESSIONS,
+    WITHDRAW_METHODS, DC_PER_USD, MIN_WITHDRAW_USDT,
     WITHDRAW_TASKS_REQUIRED, WITHDRAW_ADS_REQUIRED, WITHDRAW_VALID_REFERRALS_PER_WITHDRAW,
     WITHDRAW_DAY_ONLY_FRIDAY,
     todayBD, isFridayBD, WITHDRAWALS_OPEN,
 } from '../lib/constants.js';
 
 const ADMIN_ID = process.env.ADMIN_ID;
-
-// impressions + the CPM rate at request time → USD payout. dcEquivalent is
-// kept alongside purely for admin/audit display (e.g. "this many DC worth
-// of impressions") and for the referral-commission calc in api/bot.js —
-// it's never actually debited/credited anywhere as DC.
-function calcPayout(impressions, cpmRate) {
-    const usdAmount = (impressions / 1000) * cpmRate;
-    const dcEquivalent = impressions * DC_PER_IMPRESSION;
-    return { usdAmount, dcEquivalent };
-}
 
 // ── GET ?action=status — everything the withdraw screen needs in one call ──
 async function handleStatus(req, res, db) {
@@ -67,11 +54,9 @@ async function handleStatus(req, res, db) {
     const user = await users.findOne({ _id: id });
     if (!user) return res.status(404).json({ ok: false, error: 'user_not_found' });
 
-    const cpmRate = await getCpmRate(db);
-
     const adsToday = user.lastResetDate === today ? (user.adsWatchedToday || 0) : 0;
-    // ⚠️ CHANGED — tasks requirement is now LIFETIME, one-time (not daily).
-    // Once completedTasks.length ever reaches WITHDRAW_TASKS_REQUIRED, this
+    // ⚠️ Tasks requirement is LIFETIME, one-time (not daily). Once
+    // completedTasks.length ever reaches WITHDRAW_TASKS_REQUIRED, this
     // stays satisfied forever — no daily reset involved.
     const tasksLifetime = (user.completedTasks || []).length;
     const isFirstWithdraw = (user.withdrawalCount || 0) === 0;
@@ -79,11 +64,10 @@ async function handleStatus(req, res, db) {
 
     return res.status(200).json({
         ok: true,
-        dcBalance: user.dcBalance || 0,                 // shown for context only — Convert first, see api/convert.js
-        impressionBalance: user.impressionBalance || 0,  // ⚠️ NEW — this is what's actually withdrawable now
-        dcPerImpression: DC_PER_IMPRESSION,
-        cpmRate,
-        minWithdrawImpressions: MIN_WITHDRAW_IMPRESSIONS,
+        dcBalance: user.dcBalance || 0,       // shown for context only — Convert first, see api/convert.js
+        usdtBalance: user.usdtBalance || 0,   // this is what's actually withdrawable
+        dcPerUsd: DC_PER_USD,
+        minWithdrawUsdt: MIN_WITHDRAW_USDT,
         withdrawalsOpen: WITHDRAWALS_OPEN,
         fridayOnly: WITHDRAW_DAY_ONLY_FRIDAY,
         isFridayToday: isFridayBD(),
@@ -133,14 +117,14 @@ async function handleCreate(req, res, db) {
     const id = String(verified.user.id);
 
     const { method, details } = req.body || {};
-    const impressions = Math.floor(Number(req.body?.impressions));
+    const usdtAmount = Number(req.body?.usdtAmount);
 
     if (!method || !details) return res.status(400).json({ ok: false, error: 'missing_fields' });
-    if (!impressions || isNaN(impressions) || impressions <= 0) return res.status(400).json({ ok: false, error: 'invalid_amount' });
-    if (impressions < MIN_WITHDRAW_IMPRESSIONS) {
+    if (!usdtAmount || isNaN(usdtAmount) || usdtAmount <= 0) return res.status(400).json({ ok: false, error: 'invalid_amount' });
+    if (usdtAmount < MIN_WITHDRAW_USDT) {
         return res.status(400).json({
             ok: false, error: 'below_minimum',
-            message: `Minimum ${MIN_WITHDRAW_IMPRESSIONS.toLocaleString()} impressions required to withdraw.`,
+            message: `Minimum $${MIN_WITHDRAW_USDT} required to withdraw.`,
         });
     }
 
@@ -173,11 +157,11 @@ async function handleCreate(req, res, db) {
         });
     }
 
-    // ── balance — impressionBalance now, not dcBalance ──
-    if ((user.impressionBalance || 0) < impressions) {
+    // ── balance — usdtBalance now, not dcBalance ──
+    if ((user.usdtBalance || 0) < usdtAmount) {
         return res.status(400).json({
             ok: false, error: 'insufficient_balance',
-            message: `You need ${impressions.toLocaleString()} impressions to withdraw this amount. Convert some DC first.`,
+            message: `You need $${usdtAmount.toFixed(4)} USDT to withdraw this amount. Convert some DC first.`,
         });
     }
 
@@ -193,11 +177,12 @@ async function handleCreate(req, res, db) {
         });
     }
 
-    const cpmRate = await getCpmRate(db);
-    const { usdAmount, dcEquivalent } = calcPayout(impressions, cpmRate);
+    // Kept purely for admin/audit display + the referral commission calc
+    // in api/bot.js — never itself a real balance.
+    const dcEquivalent = Math.round(usdtAmount * DC_PER_USD);
 
     const updateOps = {
-        $inc: { impressionBalance: -impressions, withdrawalCount: 1 },
+        $inc: { usdtBalance: -usdtAmount, withdrawalCount: 1 },
         $set: { withdrawPending: true },
     };
     if (willConsumeReferral) updateOps.$inc.usedValidReferrals = 1;
@@ -214,13 +199,13 @@ async function handleCreate(req, res, db) {
         {
             _id: id,
             isBanned: { $ne: true },
-            impressionBalance: { $gte: impressions },
+            usdtBalance: { $gte: usdtAmount },
             lastResetDate: today,
             adsWatchedToday: { $gte: WITHDRAW_ADS_REQUIRED },
             withdrawPending: { $ne: true },
             $expr: {
                 $and: [
-                    // ⚠️ CHANGED — tasks requirement re-verified here against the
+                    // ⚠️ Tasks requirement re-verified here against the
                     // LIFETIME completedTasks array size, not a daily counter.
                     { $gte: [{ $size: { $ifNull: ['$completedTasks', []] } }, WITHDRAW_TASKS_REQUIRED] },
                     ...(willConsumeReferral ? [{
@@ -246,7 +231,7 @@ async function handleCreate(req, res, db) {
         }
         return res.status(409).json({
             ok: false, error: 'gate_failed',
-            message: 'Could not process the withdrawal — your impression balance, ad/task progress, or referral status may have changed. Please refresh and try again.',
+            message: 'Could not process the withdrawal — your USDT balance, ad/task progress, or referral status may have changed. Please refresh and try again.',
         });
     }
 
@@ -256,10 +241,9 @@ async function handleCreate(req, res, db) {
         username: verified.user.username || null,
         method,
         details,
-        impressions,           // ⚠️ CHANGED — this is what's actually debited/refunded now
+        usdtAmount,             // ⚠️ this is what's actually debited/refunded now
         dcEquivalent,           // display/audit/commission-calc only — never itself a real balance
-        cpmRateAtRequest: cpmRate,
-        cashAmount: usdAmount,  // kept name — api/bot.js reads this for admin/approve/reject messages
+        cashAmount: usdtAmount, // kept name — api/bot.js reads this for admin/approve/reject messages
         currency: methodConfig.currency,
         referralConsumed: willConsumeReferral,
         status: 'pending',
@@ -267,13 +251,9 @@ async function handleCreate(req, res, db) {
     };
     const inserted = await withdrawals.insertOne(withdrawDoc);
 
-    // ⚠️ REMOVED (this update) — referral commission used to be paid HERE,
-    // the instant a withdrawal was requested, before any admin review. That
-    // duplicated the (correct) approval-time payout in api/bot.js's
-    // finalizeWithdrawal, meaning a referrer was actually credited TWICE
-    // per withdrawal — once on request, once on approval — with no
-    // claw-back if the withdrawal was later rejected. Commission is now
-    // paid exactly once, only on actual approval — see api/bot.js.
+    // Referral commission fires only on actual APPROVAL — see
+    // api/bot.js's finalizeWithdrawal — not here at request time, so a
+    // later rejection never needs a claw-back.
     await withdrawals.updateOne(
         { _id: inserted.insertedId },
         { $set: { referrerId: user.referredBy || null, referrerCommissionPaid: 0 } }
@@ -283,9 +263,7 @@ async function handleCreate(req, res, db) {
         const adminText =
             `💸 <b>New Withdraw Request</b>\n\n` +
             `👤 User: <code>${id}</code>${verified.user.username ? ' (@' + verified.user.username + ')' : ''}\n` +
-            `📊 Impressions: <b>${impressions.toLocaleString()}</b> (≈ ${dcEquivalent.toLocaleString()} DC)\n` +
-            `📈 CPM used: <b>$${cpmRate}</b> / 1K impressions\n` +
-            `💰 Amount: <b>$${usdAmount.toFixed(4)} ${methodConfig.currency}</b>\n` +
+            `💰 Amount: <b>$${usdtAmount.toFixed(4)} ${methodConfig.currency}</b> (≈ ${dcEquivalent.toLocaleString()} DC)\n` +
             `📤 Method: <b>${methodConfig.label}</b>\n` +
             `📍 Address: <code>${details}</code>\n` +
             `📊 Total withdrawals so far: <b>${user.withdrawalCount || 0}</b>\n` +
@@ -301,8 +279,8 @@ async function handleCreate(req, res, db) {
     return res.status(200).json({
         ok: true,
         withdrawId: inserted.insertedId,
-        impressions, dcEquivalent, usdAmount,
-        newImpressionBalance: gate.impressionBalance,
+        usdtAmount, dcEquivalent,
+        newUsdtBalance: gate.usdtBalance,
         status: 'pending',
     });
 }
@@ -322,4 +300,4 @@ export default async function handler(req, res) {
     }
 
     return res.status(405).json({ ok: false, error: 'method_not_allowed' });
-             }
+}
