@@ -1,4 +1,4 @@
-// models/schema.js — SURF BLAZE স্কিমা (single DC currency, impression/CPM withdraw economy)
+// models/schema.js — SURF BLAZE স্কিমা (DC → USDT Convert, USDT-direct withdraw)
 //
 // চালানোর কমান্ড: node models/schema.js
 //
@@ -62,8 +62,8 @@
 //   currentGameStartTime: null,         // ⚠️ NEW — only THIS startTime can be claimed; a new gameStart call overwrites it, instantly invalidating whatever token came before (closes a "mint many tokens, wait, claim them all" exploit — see api/earn.js)
 //   gameHighScore: 0,                   // best single-run distance ("meters") ever reached — raised via $max on every claim, powers the Home "Top Scores" leaderboard
 //
-//   // ── Convert: DC → impression (⚠️ NEW) ──
-//   impressionBalance: 0,               // withdraw-only currency — gained EXCLUSIVELY via Convert (api/convert.js), spent via withdraw (api/withdraw.js)
+//   // ── Convert: DC → USDT (⚠️ RE-ADDED — an earlier pass removed this by mistake) ──
+//   usdtBalance: 0,                      // withdraw-only currency — gained EXCLUSIVELY via Convert (api/convert.js), spent via withdraw (api/withdraw.js)
 //   lastConvertDate: null,              // Bangladesh calendar date ("YYYY-MM-DD" via todayBD()) of the last successful Convert — enforces CONVERT_DAILY_LIMIT (currently 1/day)
 // }
 //
@@ -133,9 +133,9 @@
 // {
 //   _id: ObjectId, userId: "123456789", method: "binance" | "tonkeeper",
 //   details: "address/uid",
-//   ⚠️ CHANGED — withdrawals are now impression-only (see api/withdraw.js).
-//   impressions: 40,                     // debited from impressionBalance — this is the real, refundable amount
-//   dcEquivalent: 2000,                  // impressions × DC_PER_IMPRESSION — display/audit/commission-calc ONLY, never itself a balance
+//   ⚠️ CHANGED — withdrawals are now USDT-direct (see api/withdraw.js).
+//   usdtAmount: 0.04,                    // debited from usdtBalance — this is the real, refundable amount
+//   dcEquivalent: 2000,                  // usdtAmount × DC_PER_USD — display/audit/commission-calc ONLY, never itself a balance
 //   cpmRateAtRequest: 0.2, cashAmount: 0.008, currency: "USDT",
 //   referralConsumed: false,            // true if this withdraw spent one of the user's valid referrals (all but their 1st)
 //   referrerId: "123456789" | null,     // ⚠️ NEW — snapshot of user.referredBy at withdraw time, for audit
@@ -145,7 +145,7 @@
 //
 // ⚠️ NEW — a partial TTL index on `processedAt` (see setupIndexes below)
 // auto-deletes a withdrawal doc 90 days after it's REJECTED — a rejected
-// request already refunds the impressions in full at reject time, so it has
+// request already refunds the USDT in full at reject time, so it has
 // no further use beyond a brief audit trail. 'pending'/'approved' withdrawals
 // are real financial records and are never touched by this index.
 //
