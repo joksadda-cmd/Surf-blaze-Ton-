@@ -1,13 +1,14 @@
-// api/convert.js — DC → IMPRESSION CONVERT (⚠️ NEW)
+// api/convert.js — DC → USDT CONVERT (⚠️ RE-ADDED — an earlier pass removed
+// this entirely and made withdraw pull straight from dcBalance; that was
+// wrong. Convert stays: it's the ONLY way to get USDT balance, and
+// withdraw (api/withdraw.js) spends from usdtBalance, not dcBalance.)
 //
-// Withdrawals are impression-only (see api/withdraw.js) — this is the ONLY
-// way a user gets impressions. They pick a DC amount from their dcBalance,
-// a flat CONVERT_FEE_PERCENT fee is taken straight out of that DC amount
-// (the fee portion is simply never converted — it's gone, same as any
-// exchange fee), and the remainder becomes impressions at the fixed
-// DC_PER_IMPRESSION ratio used everywhere else in the app. Limited to
-// CONVERT_DAILY_LIMIT (currently 1) successful conversions per Bangladesh
-// calendar day.
+// A user picks a DC amount from their dcBalance, a flat
+// CONVERT_FEE_PERCENT fee is taken straight out of that DC amount (the fee
+// portion is simply never converted — it's gone, same as any exchange
+// fee), and the remainder becomes USDT balance at the fixed DC_PER_USD
+// rate used everywhere else in the app. Limited to CONVERT_DAILY_LIMIT
+// (currently 1) successful conversions per Bangladesh calendar day.
 //
 //   GET  /api/convert?action=status&initData=...   → balances + eligibility, for rendering the Convert screen
 //   POST /api/convert   body: { initData, dcAmount }
@@ -17,17 +18,17 @@ import { ensureDailyReset } from '../lib/dailyReset.js';
 import { verifyTelegramInitData } from '../lib/telegramAuth.js';
 import {
     CONVERT_MIN_DC, CONVERT_MAX_DC, CONVERT_FEE_PERCENT, CONVERT_DAILY_LIMIT,
-    DC_PER_IMPRESSION, todayBD,
+    DC_PER_USD, todayBD,
 } from '../lib/constants.js';
 
-// dcAmount → { feeDc, netDc, impressionsGained }. Pulled out so both the
-// status preview (if ever needed) and the real create path compute this
+// dcAmount → { feeDc, netDc, usdtGained }. Pulled out so both the status
+// preview (if ever needed) and the real create path compute this
 // identically — one place, one formula.
 function calcConvert(dcAmount) {
     const feeDc = Math.round(dcAmount * (CONVERT_FEE_PERCENT / 100));
     const netDc = dcAmount - feeDc;
-    const impressionsGained = Math.floor(netDc / DC_PER_IMPRESSION);
-    return { feeDc, netDc, impressionsGained };
+    const usdtGained = netDc / DC_PER_USD;
+    return { feeDc, netDc, usdtGained };
 }
 
 // ── GET ?action=status — everything the Convert screen needs in one call ──
@@ -52,8 +53,8 @@ async function handleStatus(req, res, db) {
     return res.status(200).json({
         ok: true,
         dcBalance: user.dcBalance || 0,
-        impressionBalance: user.impressionBalance || 0,
-        dcPerImpression: DC_PER_IMPRESSION,
+        usdtBalance: user.usdtBalance || 0,
+        dcPerUsd: DC_PER_USD,
         minDc: CONVERT_MIN_DC,
         maxDc: CONVERT_MAX_DC,
         feePercent: CONVERT_FEE_PERCENT,
@@ -102,15 +103,13 @@ async function handleCreate(req, res, db) {
         return res.status(400).json({ ok: false, error: 'insufficient_balance', message: `You need ${dcAmount.toLocaleString()} DC to convert this amount.` });
     }
 
-    const { feeDc, netDc, impressionsGained } = calcConvert(dcAmount);
-    if (impressionsGained <= 0) {
-        // Can only happen right at the CONVERT_MIN_DC floor if
-        // CONVERT_FEE_PERCENT/DC_PER_IMPRESSION are ever changed without
-        // re-checking the floor still clears 1 whole impression after the
-        // fee — defensive, shouldn't trigger with the current numbers.
+    const { feeDc, netDc, usdtGained } = calcConvert(dcAmount);
+    if (usdtGained <= 0) {
+        // Defensive — shouldn't trigger with the current numbers (500 DC
+        // minimum always clears a non-zero USDT amount at this rate).
         return res.status(400).json({
             ok: false, error: 'amount_too_small',
-            message: `That amount converts to 0 impressions after the ${CONVERT_FEE_PERCENT}% fee — try a larger amount.`,
+            message: `That amount converts to $0 after the ${CONVERT_FEE_PERCENT}% fee — try a larger amount.`,
         });
     }
 
@@ -131,7 +130,7 @@ async function handleCreate(req, res, db) {
             lastConvertDate: { $ne: today },
         },
         {
-            $inc: { dcBalance: -dcAmount, impressionBalance: impressionsGained },
+            $inc: { dcBalance: -dcAmount, usdtBalance: usdtGained },
             $set: { lastConvertDate: today },
         },
         { returnDocument: 'after' }
@@ -156,9 +155,9 @@ async function handleCreate(req, res, db) {
         dcConverted: dcAmount,
         feeDc,
         netDc,
-        impressionsGained,
+        usdtGained,
         newDcBalance: gate.dcBalance,
-        newImpressionBalance: gate.impressionBalance,
+        newUsdtBalance: gate.usdtBalance,
     });
 }
 
