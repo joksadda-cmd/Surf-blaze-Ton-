@@ -136,7 +136,8 @@
 //   ⚠️ CHANGED — withdrawals are now USDT-direct (see api/withdraw.js).
 //   usdtAmount: 0.04,                    // debited from usdtBalance — this is the real, refundable amount
 //   dcEquivalent: 2000,                  // usdtAmount × DC_PER_USD — display/audit/commission-calc ONLY, never itself a balance
-//   cpmRateAtRequest: 0.2, cashAmount: 0.008, currency: "USDT",
+//   cashAmount: 0.008,                   // kept name, always equal to usdtAmount — api/bot.js reads this for admin messages
+//   currency: "USDT",
 //   referralConsumed: false,            // true if this withdraw spent one of the user's valid referrals (all but their 1st)
 //   referrerId: "123456789" | null,     // ⚠️ NEW — snapshot of user.referredBy at withdraw time, for audit
 //   referrerCommissionPaid: 0,          // 10% of dcEquivalent credited to referrerId (as DC), paid at APPROVAL time (api/bot.js), 0 if no referrer or still pending
