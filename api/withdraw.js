@@ -9,12 +9,10 @@
 // is taken on withdraw itself (the only fee in this whole DC→USDT→cash
 // pipeline is the Convert fee, already paid at the Convert step).
 //
-// ⚠️ Weekly-Friday-only submission window — withdraw requests are only
-// accepted when isFridayBD() is true — "airdrop-style," once a week,
-// Bangladesh time. Approving/rejecting an already-submitted request from
-// the bot is NOT restricted to Fridays — only the user-facing submission is.
-// WITHDRAWALS_OPEN is still the separate, existing manual admin on/off
-// switch — both gates apply independently.
+// ⚠️ REMOVED — the weekly-Friday-only submission window was fully removed
+// per admin request. Withdrawals can be submitted any day, any time, as
+// long as WITHDRAWALS_OPEN (the manual admin on/off switch) is true and the
+// other requirements (level, tasks, ads, referral) below are met.
 //
 // Referral gate: the user's FIRST withdrawal ever is free. Every withdrawal
 // after that consumes exactly one "valid referral" — see lib/referral.js,
@@ -25,7 +23,7 @@
 // No address lock — user can withdraw to a different address/method every
 // time if they want.
 //
-//   GET  /api/withdraw?action=status&initData=...   → USDT balance + full eligibility snapshot (includes isFridayToday)
+//   GET  /api/withdraw?action=status&initData=...   → USDT balance + full eligibility snapshot
 //   GET  /api/withdraw?action=history&initData=...
 //   POST /api/withdraw   body: { initData, method, details, usdtAmount }
 
@@ -36,9 +34,15 @@ import { verifyTelegramInitData } from '../lib/telegramAuth.js';
 import {
     WITHDRAW_METHODS, DC_PER_USD, MIN_WITHDRAW_USDT,
     WITHDRAW_TASKS_REQUIRED, WITHDRAW_ADS_REQUIRED, WITHDRAW_VALID_REFERRALS_PER_WITHDRAW,
-    WITHDRAW_DAY_ONLY_FRIDAY,
-    todayBD, isFridayBD, WITHDRAWALS_OPEN,
+    WITHDRAW_MIN_LEVEL, LEVEL_XP_THRESHOLDS, levelFromXp,
+    todayBD, WITHDRAWALS_OPEN,
 } from '../lib/constants.js';
+
+// Minimum XP needed for WITHDRAW_MIN_LEVEL, precomputed once — the atomic
+// gate below needs a plain number for its $expr (can't call levelFromXp()
+// inside a MongoDB expression), so this is the one place that number is
+// derived from LEVEL_XP_THRESHOLDS instead of being hand-copied.
+const MIN_XP_FOR_WITHDRAW = LEVEL_XP_THRESHOLDS[WITHDRAW_MIN_LEVEL - 1];
 
 const ADMIN_ID = process.env.ADMIN_ID;
 
@@ -61,6 +65,7 @@ async function handleStatus(req, res, db) {
     const tasksLifetime = (user.completedTasks || []).length;
     const isFirstWithdraw = (user.withdrawalCount || 0) === 0;
     const validAvailable = Math.max(0, (user.validReferralCount || 0) - (user.usedValidReferrals || 0));
+    const levelInfo = levelFromXp(user.xp);
 
     return res.status(200).json({
         ok: true,
@@ -69,11 +74,11 @@ async function handleStatus(req, res, db) {
         dcPerUsd: DC_PER_USD,
         minWithdrawUsdt: MIN_WITHDRAW_USDT,
         withdrawalsOpen: WITHDRAWALS_OPEN,
-        fridayOnly: WITHDRAW_DAY_ONLY_FRIDAY,
-        isFridayToday: isFridayBD(),
         withdrawRequirements: {
             adsRequired: WITHDRAW_ADS_REQUIRED, adsWatchedToday: adsToday, adsMet: adsToday >= WITHDRAW_ADS_REQUIRED,
             tasksRequired: WITHDRAW_TASKS_REQUIRED, tasksHave: tasksLifetime, tasksMet: tasksLifetime >= WITHDRAW_TASKS_REQUIRED,
+            levelRequired: WITHDRAW_MIN_LEVEL, levelHave: levelInfo.level, levelMet: levelInfo.level >= WITHDRAW_MIN_LEVEL,
+            xp: levelInfo.xp, xpForNextLevel: levelInfo.xpForNextLevel,
         },
         referralRequirement: {
             isFirstWithdrawFree: isFirstWithdraw,
@@ -108,9 +113,6 @@ async function handleCreate(req, res, db) {
     if (!WITHDRAWALS_OPEN) {
         return res.status(403).json({ ok: false, error: 'withdrawals_closed', message: 'Withdrawals are currently closed. Any previously submitted request will still be processed.' });
     }
-    if (WITHDRAW_DAY_ONLY_FRIDAY && !isFridayBD()) {
-        return res.status(403).json({ ok: false, error: 'not_friday', message: 'Withdrawals only open on Fridays. Come back this Friday to submit your request.' });
-    }
 
     const verified = verifyTelegramInitData(req.body?.initData);
     if (!verified.ok) return res.status(401).json({ ok: false, error: 'unauthorized', reason: verified.error });
@@ -136,6 +138,20 @@ async function handleCreate(req, res, db) {
     const user = await users.findOne({ _id: id });
     if (!user) return res.status(404).json({ ok: false, error: 'user_not_found' });
     if (user.isBanned) return res.status(403).json({ ok: false, error: 'banned' });
+
+    // ── level requirement — see lib/constants.js WITHDRAW_MIN_LEVEL. Level
+    // only rises via genuine ad-watch XP accrued over time, which is the
+    // whole point: it's friction a scripted/Termux-style caller can't skip
+    // by just hitting this endpoint directly, unlike a same-day counter. ──
+    const levelInfo = levelFromXp(user.xp);
+    if (levelInfo.level < WITHDRAW_MIN_LEVEL) {
+        return res.status(400).json({
+            ok: false, error: 'level_too_low',
+            levelRequired: WITHDRAW_MIN_LEVEL, levelHave: levelInfo.level,
+            xp: levelInfo.xp, xpForNextLevel: levelInfo.xpForNextLevel,
+            message: `Reach Level ${WITHDRAW_MIN_LEVEL} before you can withdraw (you're Level ${levelInfo.level}). Watch ads to earn XP and level up.`,
+        });
+    }
 
     // ── lifetime tasks requirement (one-time, not daily) ──
     const tasksLifetime = (user.completedTasks || []).length;
@@ -202,6 +218,7 @@ async function handleCreate(req, res, db) {
             usdtBalance: { $gte: usdtAmount },
             lastResetDate: today,
             adsWatchedToday: { $gte: WITHDRAW_ADS_REQUIRED },
+            xp: { $gte: MIN_XP_FOR_WITHDRAW },
             withdrawPending: { $ne: true },
             $expr: {
                 $and: [
@@ -300,4 +317,4 @@ export default async function handler(req, res) {
     }
 
     return res.status(405).json({ ok: false, error: 'method_not_allowed' });
-}
+            }
