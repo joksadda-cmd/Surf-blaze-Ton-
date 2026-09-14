@@ -77,6 +77,7 @@ async function handleInit(req, res, db) {
         telegramUsername: username || 'N/A',
         dcBalance: 0,
         usdtBalance: 0,
+        xp: 0, // ⚠️ NEW — level/XP system, see lib/constants.js levelFromXp()/WITHDRAW_MIN_LEVEL
         lastConvertDate: null,      // ⚠️ RE-ADDED — Bangladesh calendar date of the last successful Convert, enforces the once-a-day limit
         lifetimeDcEarned: 0,
         referralCount: 0,
