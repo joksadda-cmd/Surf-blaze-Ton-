@@ -34,8 +34,7 @@ export default async function handler(req, res) {
         }
 
         if (type === 'leaderboard') {
-            // ফিক্স: আগে ভুলে lifetimeWtcEarned দিয়ে সর্ট হতো, কিন্তু লেবেল ছিল "Top Referrer" —
-            // এখন আসল referralCount দিয়েই সর্ট ও দেখানো হচ্ছে
+            // Sorted/shown by actual referralCount ("Top Referrer").
             const top = await db.collection('users')
                 .find({ isBanned: { $ne: true } })
                 .project({ telegramUsername: 1, firstName: 1, referralCount: 1 })
@@ -45,20 +44,28 @@ export default async function handler(req, res) {
             return res.status(200).json({ ok: true, leaderboard: top });
         }
 
-        // ⚠️ NEW — Surf Drive top-scorer list (Home tab's "Top Scores" button).
-        // Ranked by gameHighScore (best single-run distance in "meters"),
-        // the same lifetime-best field claimGameReward raises via $max in
-        // api/earn.js. Users who've never played (or never beaten 0) are
-        // excluded rather than shown at the bottom with a 0. Top 30
-        // (⚠️ CHANGED — was 20). Each user has exactly one `users` document,
-        // so this query can never return the same person twice on its own —
-        // see the frontend note in index.html's openGameLeaderboardModal for
-        // the one place a duplicate could otherwise appear to the viewer.
+        // ⚠️ Surf Drive top-scorer list (by best single-run distance) — kept
+        // for potential future use, but the Home tab's "Top Scores" button
+        // itself now uses 'topEarners' below (admin decided the app's main
+        // leaderboard should rank by DC earned, not game distance).
         if (type === 'gameLeaderboard') {
             const top = await db.collection('users')
                 .find({ isBanned: { $ne: true }, gameHighScore: { $gt: 0 } })
                 .project({ telegramUsername: 1, firstName: 1, gameHighScore: 1 })
                 .sort({ gameHighScore: -1 })
+                .limit(30)
+                .toArray();
+            return res.status(200).json({ ok: true, leaderboard: top });
+        }
+
+        // Home tab's "Top Scores" button — ranked by lifetimeDcEarned (total
+        // DC ever earned, never decreases on withdraw/spend — see the $inc
+        // calls in api/earn.js, api/gift.js, api/bot.js, lib/referral.js).
+        if (type === 'topEarners') {
+            const top = await db.collection('users')
+                .find({ isBanned: { $ne: true }, lifetimeDcEarned: { $gt: 0 } })
+                .project({ telegramUsername: 1, firstName: 1, lifetimeDcEarned: 1 })
+                .sort({ lifetimeDcEarned: -1 })
                 .limit(30)
                 .toArray();
             return res.status(200).json({ ok: true, leaderboard: top });
@@ -99,4 +106,4 @@ export default async function handler(req, res) {
         console.error('data error:', err);
         return res.status(500).json({ ok: false, error: 'server_error' });
     }
-}
+                }
